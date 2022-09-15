@@ -49,8 +49,7 @@ class AllMetricsFuture(typing_extensions.Protocol):
 
 
 MetricsAndOutputsType = Tuple[AllMetricsFuture,  # metrics
-                              AllOutputTokensType,
-                              AllOutputScoresType]  # outputs
+                              Any]  # outputs
 
 
 def get_valid_eval_tasks(tasks: Sequence[Task], split: str) -> Sequence[Task]:
@@ -587,16 +586,6 @@ class Evaluator:
     # make sure the examples are sorted by example index.
     all_output = {}
 
-    # Maps task.name to a list of sequences of output tokens from the model.
-    all_output_tokens = {}
-
-    # Maps task.name to dictionary of auxiliary sequences of values.
-    all_aux_values = {}
-
-    # Maps task.name to scores produced by the model of the target sequence
-    # conditioned on the input sequence.
-    all_output_scores = {}
-
     for task in self.eval_tasks:
       logging.info("Evaluating %s", task.name)
 
@@ -610,21 +599,6 @@ class Evaluator:
           all_output[task.name][model_output_type] = _extract_model_output(
               self._cached_model_datasets[task.name], model_fn)
 
-    for task in self.eval_tasks:
-      if metrics_lib.ModelOutputType.PREDICTION_WITH_AUX in all_output[
-          task.name]:
-        all_output_tokens[task.name] = all_output[task.name][
-            metrics_lib.ModelOutputType.PREDICTION_WITH_AUX][0]
-        all_aux_values[task.name] = all_output[task.name][
-            metrics_lib.ModelOutputType.PREDICTION_WITH_AUX][1]
-      elif metrics_lib.ModelOutputType.PREDICTION in all_output[task.name]:
-        all_output_tokens[task.name] = all_output[task.name][
-            metrics_lib.ModelOutputType.PREDICTION]
-        all_aux_values[task.name] = []
-      if metrics_lib.ModelOutputType.SCORE in all_output[task.name]:
-        all_output_scores[task.name] = all_output[task.name][
-            metrics_lib.ModelOutputType.SCORE]
-
     if compute_metrics:
       if self._metrics_future:
         # Ensure previous step's metrics are finished and raise any exceptions
@@ -636,8 +610,7 @@ class Evaluator:
 
       def compute_metrics_fn():
         tick = time.time()
-        metrics = self._compute_metrics(all_output_tokens, all_output_scores,
-                                        all_aux_values, step)
+        metrics = self._compute_metrics_v2(all_output, step)
         logging.info("Time computing metrics: %f secs.", time.time() - tick)
         return metrics
 
@@ -658,7 +631,7 @@ class Evaluator:
     else:
       all_metrics = concurrent.futures.Future()
       all_metrics.set_result(None)
-    return all_metrics, all_output_tokens, all_output_scores
+    return all_metrics, all_output
 
   def _decode_and_postprocess_predictions(self, task, predicted_tokens,
                                           task_dataset, targets):
